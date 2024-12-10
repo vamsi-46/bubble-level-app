@@ -1,0 +1,135 @@
+package com.example.bubblelevel
+
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
+import android.os.Bundle
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.wrapContentSize
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.runtime.*
+import androidx.compose.ui.tooling.preview.Preview
+import com.example.bubblelevel.ui.theme.BubbleLevelTheme
+
+class MainActivity : ComponentActivity() {
+    private lateinit var sensorManager: SensorManager
+    private var accelerometer: Sensor? = null
+    private var listener: SensorEventListener? = null
+
+    // State variables to track the orientation of the device
+    private var xValue by mutableStateOf(0f)
+    private var yValue by mutableStateOf(0f)
+    private var zValue by mutableStateOf(0f)
+    private var isFlat by mutableStateOf(false)
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+
+        sensorManager = getSystemService(SENSOR_SERVICE) as SensorManager
+        accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+
+        // Sensor event listener to detect changes in device orientation
+        listener = object : SensorEventListener {
+            override fun onSensorChanged(event: SensorEvent?) {
+                event?.let {
+                    if (it.sensor.type == Sensor.TYPE_ACCELEROMETER) {
+                        // Fetch accelerometer values for X, Y, and Z axis
+                        xValue = it.values[0]
+                        yValue = it.values[1]
+                        zValue = it.values[2]
+
+                        // Determine if the device is lying flat (near zero tilt)
+                        val totalAcceleration = sqrt(xValue * xValue + yValue * yValue + zValue * zValue)
+                        isFlat = totalAcceleration < 10 // flat when acceleration is close to gravity (~9.81)
+                    }
+                }
+            }
+
+            override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
+        }
+
+        // Register sensor listener
+        sensorManager.registerListener(listener, accelerometer, SensorManager.SENSOR_DELAY_UI)
+
+        setContent {
+            BubbleLevelTheme {
+                // Surface to contain the bubble level
+                Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                    DeviceOrientationView(isFlat, xValue, yValue, zValue)
+                }
+            }
+        }
+    }
+
+    // Clean up the sensor listener
+    override fun onPause() {
+        super.onPause()
+        sensorManager.unregisterListener(listener)
+    }
+
+    // Composable to show the device's orientation and corresponding bubble level
+    @Composable
+    fun DeviceOrientationView(isFlat: Boolean, xValue: Float, yValue: Float, zValue: Float) {
+        if (isFlat) {
+            // Show bubble level for flat device (Circular bubble in 2D space)
+            BubbleLevelFlat(xValue, yValue, zValue)
+        } else {
+            // Show bubble level for vertical device (Bubble moves in 1D)
+            BubbleLevelVertical(xValue, yValue, zValue)
+        }
+    }
+
+    // Composable for flat device (bubble moves in 2D)
+    @Composable
+    fun BubbleLevelFlat(xValue: Float, yValue: Float, zValue: Float) {
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val tiltX = xValue / sqrt(xValue * xValue + yValue * yValue + zValue * zValue)
+            val tiltY = yValue / sqrt(xValue * xValue + yValue * yValue + zValue * zValue)
+
+            val bubbleRadius = size.minDimension * 0.1f
+            val horizontalOffset = size.width / 2f + tiltX * (size.width / 2f - bubbleRadius)
+            val verticalOffset = size.height / 2f + tiltY * (size.height / 2f - bubbleRadius)
+
+            drawCircle(
+                color = Color.Green,
+                radius = bubbleRadius,
+                center = Offset(horizontalOffset, verticalOffset)
+            )
+        }
+    }
+
+    // Composable for vertical device (bubble moves in 1D)
+    @Composable
+    fun BubbleLevelVertical(xValue: Float, yValue: Float, zValue: Float) {
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val tiltX = xValue / sqrt(xValue * xValue + yValue * yValue + zValue * zValue)
+
+            val bubbleRadius = size.width * 0.1f
+            val horizontalOffset = size.width / 2f + tiltX * (size.width / 2f - bubbleRadius)
+
+            drawCircle(
+                color = Color.Red,
+                radius = bubbleRadius,
+                center = Offset(horizontalOffset, size.height / 2f)
+            )
+        }
+    }
+
+    // Preview the device orientation view
+    @Preview(showBackground = true)
+    @Composable
+    fun DefaultPreview() {
+        BubbleLevelTheme {
+            DeviceOrientationView(isFlat = true, xValue = 0f, yValue = 0f, zValue = 9.81f)  // Preview for flat device
+        }
+    }
+}

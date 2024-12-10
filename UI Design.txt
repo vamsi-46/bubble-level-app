@@ -1,0 +1,206 @@
+package com.example.bubblelevel
+
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
+import android.os.Bundle
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.text.BasicText
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.unit.dp
+import androidx.compose.runtime.*
+import androidx.compose.ui.tooling.preview.Preview
+import com.example.bubblelevel.ui.theme.BubbleLevelTheme
+import kotlin.math.*
+
+class MainActivity : ComponentActivity() {
+    private lateinit var sensorManager: SensorManager
+    private var accelerometer: Sensor? = null
+    private var magnetometer: Sensor? = null
+    private var listener: SensorEventListener? = null
+
+    // Sensor data
+    private var xValue by mutableStateOf(0f)
+    private var yValue by mutableStateOf(0f)
+    private var zValue by mutableStateOf(0f)
+
+    private var magnetometerData = FloatArray(3)
+    private var accelerometerData = FloatArray(3)
+
+    // For holding the last 500 values for the 2D bubble
+    private val sensorValuesQueueX = ArrayDeque<Float>(500)
+    private val sensorValuesQueueY = ArrayDeque<Float>(500)
+
+    // Max and min angles for the 2D bubble
+    private var maxAngleX by mutableStateOf(-Float.MAX_VALUE)
+    private var minAngleX by mutableStateOf(Float.MAX_VALUE)
+    private var maxAngleY by mutableStateOf(-Float.MAX_VALUE)
+    private var minAngleY by mutableStateOf(Float.MAX_VALUE)
+
+    // Current angles for 2D bubble
+    private var currentAngleX by mutableStateOf(0f)
+    private var currentAngleY by mutableStateOf(0f)
+
+    // Heading for North
+    private var deviceHeading by mutableStateOf(0f)
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+
+        sensorManager = getSystemService(SENSOR_SERVICE) as SensorManager
+        accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+        magnetometer = sensorManager.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD)
+
+        listener = object : SensorEventListener {
+            override fun onSensorChanged(event: SensorEvent?) {
+                event?.let {
+                    when (it.sensor.type) {
+                        Sensor.TYPE_ACCELEROMETER -> {
+                            // Save accelerometer values
+                            accelerometerData = it.values
+                            // Calculate angles based on accelerometer
+                            val (angleX, angleY) = calculateAngles(accelerometerData[0], accelerometerData[1], accelerometerData[2])
+                            currentAngleX = angleX
+                            currentAngleY = angleY
+
+                            // Update max and min values for 2D bubble
+                            maxAngleX = max(maxAngleX, angleX)
+                            minAngleX = min(minAngleX, angleX)
+                            maxAngleY = max(maxAngleY, angleY)
+                            minAngleY = min(minAngleY, angleY)
+
+                            // Maintain the last 500 values for X and Y
+                            if (sensorValuesQueueX.size == 500) sensorValuesQueueX.removeFirst()
+                            if (sensorValuesQueueY.size == 500) sensorValuesQueueY.removeFirst()
+                            sensorValuesQueueX.addLast(angleX)
+                            sensorValuesQueueY.addLast(angleY)
+                        }
+                        Sensor.TYPE_MAGNETIC_FIELD -> {
+                            // Save magnetometer values
+                            magnetometerData = it.values
+                        }
+                    }
+                }
+                // Calculate device heading if we have both accelerometer and magnetometer data
+                if (accelerometerData.isNotEmpty() && magnetometerData.isNotEmpty()) {
+                    val rotationMatrix = FloatArray(9)
+                    val inclinationMatrix = FloatArray(9)
+
+                    val success = SensorManager.getRotationMatrix(rotationMatrix, inclinationMatrix, accelerometerData, magnetometerData)
+                    if (success) {
+                        val orientation = FloatArray(3)
+                        SensorManager.getOrientation(rotationMatrix, orientation)
+                        deviceHeading = Math.toDegrees(orientation[0].toDouble()).toFloat()  // Heading (azimuth) in degrees
+                    }
+                }
+            }
+
+            override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
+        }
+
+        // Register sensor listeners
+        sensorManager.registerListener(listener, accelerometer, SensorManager.SENSOR_DELAY_UI)
+        sensorManager.registerListener(listener, magnetometer, SensorManager.SENSOR_DELAY_UI)
+
+        setContent {
+            BubbleLevelTheme {
+                Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                    DeviceOrientationView(currentAngleX, currentAngleY, maxAngleX, minAngleX, maxAngleY, minAngleY, deviceHeading)
+                }
+            }
+        }
+    }
+
+    // Clean up the sensor listener
+    override fun onPause() {
+        super.onPause()
+        sensorManager.unregisterListener(listener)
+    }
+
+    // Function to calculate the angle from accelerometer data
+    private fun calculateAngles(x: Float, y: Float, z: Float): Pair<Float, Float> {
+        val angleX = atan2(y.toDouble(), z.toDouble()) * (180 / Math.PI)  // X angle
+        val angleY = atan2(x.toDouble(), z.toDouble()) * (180 / Math.PI)  // Y angle
+        return angleX.toFloat() to angleY.toFloat()
+    }
+
+    // Composable to display the 2D bubble, maximum and minimum values, and North line
+    @Composable
+    fun DeviceOrientationView(currentAngleX: Float, currentAngleY: Float, maxAngleX: Float, minAngleX: Float, maxAngleY: Float, minAngleY: Float, deviceHeading: Float) {
+        Column(
+            modifier = Modifier.fillMaxSize().padding(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            // 2D Bubble Level
+            BubbleLevel2D(currentAngleX, currentAngleY, deviceHeading)
+
+            // Current angles
+            BasicText(text = "Angle X: ${currentAngleX.toInt()}°", style = MaterialTheme.typography.bodyLarge)
+            BasicText(text = "Angle Y: ${currentAngleY.toInt()}°", style = MaterialTheme.typography.bodyLarge)
+
+            // Max/Min angles for X and Y
+            BasicText(text = "Max Angle X: ${maxAngleX.toInt()}°", style = MaterialTheme.typography.bodyLarge)
+            BasicText(text = "Min Angle X: ${minAngleX.toInt()}°", style = MaterialTheme.typography.bodyLarge)
+            BasicText(text = "Max Angle Y: ${maxAngleY.toInt()}°", style = MaterialTheme.typography.bodyLarge)
+            BasicText(text = "Min Angle Y: ${minAngleY.toInt()}°", style = MaterialTheme.typography.bodyLarge)
+        }
+    }
+
+    // Composable to draw the 2D bubble level, including North line
+    @Composable
+    fun BubbleLevel2D(currentAngleX: Float, currentAngleY: Float, deviceHeading: Float) {
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            // Normalize the angles to stay within [-10, 10] degrees
+            val normalizedAngleX = currentAngleX.coerceIn(-10f, 10f)
+            val normalizedAngleY = currentAngleY.coerceIn(-10f, 10f)
+
+            val bubbleRadius = size.width * 0.1f
+            val horizontalOffset = size.width / 2f + normalizedAngleX / 10f * (size.width / 2f - bubbleRadius)
+            val verticalOffset = size.height / 2f + normalizedAngleY / 10f * (size.height / 2f - bubbleRadius)
+
+            // Draw bubble
+            drawCircle(
+                color = Color.Green,
+                radius = bubbleRadius,
+                center = Offset(horizontalOffset, verticalOffset)
+            )
+
+            // Draw North line (relative to device heading)
+            val northAngle = deviceHeading - 0f  // North is at 0° by default
+            val northLineX = size.width / 2f + cos(Math.toRadians(northAngle.toDouble())).toFloat() * size.width / 4f
+            val northLineY = size.height / 2f + sin(Math.toRadians(northAngle.toDouble())).toFloat() * size.height / 4f
+
+            drawLine(
+                start = Offset(size.width / 2f, size.height / 2f),
+                end = Offset(northLineX, northLineY),
+                color = Color.Red,
+                strokeWidth = 2f
+            )
+        }
+    }
+
+    // Preview the device orientation view
+    @Preview(showBackground = true)
+    @Composable
+    fun DefaultPreview() {
+        BubbleLevelTheme {
+            DeviceOrientationView(
+                currentAngleX = 0f, currentAngleY = 0f,
+                maxAngleX = 5f, minAngleX = -5f,
+                maxAngleY = 5f, minAngleY = -5f,
+                deviceHeading = 0f
+            )
+        }
+    }
+}

@@ -1,0 +1,138 @@
+package com.example.bubblelevel
+
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
+import android.os.Bundle
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.text.BasicText
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.unit.dp
+import androidx.compose.runtime.*
+import androidx.compose.ui.tooling.preview.Preview
+import com.example.bubblelevel.ui.theme.BubbleLevelTheme
+import kotlin.math.*
+
+class MainActivity : ComponentActivity() {
+    private lateinit var sensorManager: SensorManager
+    private var accelerometer: Sensor? = null
+    private var listener: SensorEventListener? = null
+
+    // State variables to track the orientation of the device
+    private var xValue by mutableStateOf(0f)
+    private var yValue by mutableStateOf(0f)
+    private var zValue by mutableStateOf(0f)
+    
+    // For holding the last 500 values from the accelerometer
+    private val sensorValuesQueue = ArrayDeque<Float>(500)
+
+    // For the bubble level (1D case)
+    private var currentAngle by mutableStateOf(0f)  // Angle in degrees
+    
+    // Function to calculate the angle from accelerometer data
+    private fun calculateAngle(x: Float, y: Float, z: Float): Float {
+        val angle = atan2(y.toDouble(), z.toDouble()) * (180 / Math.PI)  // Convert radians to degrees
+        return angle.toFloat()
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+
+        sensorManager = getSystemService(SENSOR_SERVICE) as SensorManager
+        accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+
+        // Sensor event listener to detect changes in device orientation
+        listener = object : SensorEventListener {
+            override fun onSensorChanged(event: SensorEvent?) {
+                event?.let {
+                    if (it.sensor.type == Sensor.TYPE_ACCELEROMETER) {
+                        // Fetch accelerometer values for X, Y, and Z axis
+                        xValue = it.values[0]
+                        yValue = it.values[1]
+                        zValue = it.values[2]
+
+                        // Calculate the angle
+                        currentAngle = calculateAngle(xValue, yValue, zValue)
+
+                        // Maintain the last 500 values in the queue
+                        if (sensorValuesQueue.size == 500) {
+                            sensorValuesQueue.removeFirst()
+                        }
+                        sensorValuesQueue.addLast(currentAngle)
+                    }
+                }
+            }
+
+            override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
+        }
+
+        // Register sensor listener
+        sensorManager.registerListener(listener, accelerometer, SensorManager.SENSOR_DELAY_UI)
+
+        setContent {
+            BubbleLevelTheme {
+                Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                    DeviceOrientationView(currentAngle)
+                }
+            }
+        }
+    }
+
+    // Clean up the sensor listener
+    override fun onPause() {
+        super.onPause()
+        sensorManager.unregisterListener(listener)
+    }
+
+    // Composable to show the device's 1D bubble level and current angle
+    @Composable
+    fun DeviceOrientationView(currentAngle: Float) {
+        Column(
+            modifier = Modifier.fillMaxSize().padding(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            // Display the bubble level and the current angle
+            BubbleLevel1D(currentAngle)
+            BasicText(
+                text = "Angle: ${currentAngle.toInt()}°",
+                style = MaterialTheme.typography.bodyLarge
+            )
+        }
+    }
+
+    // Composable for the 1D bubble level (device in portrait/landscape mode)
+    @Composable
+    fun BubbleLevel1D(currentAngle: Float) {
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val normalizedAngle = currentAngle.coerceIn(-10f, 10f)  // Ensure angle stays between -10 and 10 degrees
+            val bubbleRadius = size.width * 0.1f
+            val horizontalOffset = size.width / 2f + normalizedAngle / 10f * (size.width / 2f - bubbleRadius)
+
+            drawCircle(
+                color = Color.Green,
+                radius = bubbleRadius,
+                center = Offset(horizontalOffset, size.height / 2f)
+            )
+        }
+    }
+
+    // Preview the device orientation view
+    @Preview(showBackground = true)
+    @Composable
+    fun DefaultPreview() {
+        BubbleLevelTheme {
+            DeviceOrientationView(currentAngle = 0f)  // Preview with flat orientation (0°)
+        }
+    }
+}
